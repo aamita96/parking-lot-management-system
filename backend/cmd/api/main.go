@@ -16,6 +16,7 @@ import (
 	"plms/internal/config"
 	"plms/internal/email"
 	"plms/internal/kafkax"
+	"plms/internal/notifier"
 	"plms/internal/outbox"
 	"plms/internal/platform/db"
 	"plms/internal/service"
@@ -59,19 +60,29 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
-	producer, err := kafkax.NewProducer(cfg.KafkaBrokers)
-	if err != nil {
-		return err
-	}
-	defer producer.Close()
-	go kafkax.EnsureTopics(ctx, producer, log,
-		kafkax.TopicSpec{Name: cfg.KafkaTopic, Partitions: cfg.KafkaPartitions, Replication: cfg.KafkaReplicationFactor,
-			RetentionMs: kafkax.Retention(7 * 24 * time.Hour)},
-		kafkax.TopicSpec{Name: cfg.KafkaDLQTopic, Partitions: 1, Replication: cfg.KafkaReplicationFactor,
-			RetentionMs: kafkax.Retention(14 * 24 * time.Hour)})
-	relay := &outbox.Relay{Pool: pool, Client: producer, Topic: cfg.KafkaTopic, Log: log}
-	go relay.Run(ctx)
 	go svc.RunJobs(ctx)
+
+	// Kafka is downstream of the gate (NFR-4): if it is not set up correctly yet, the API still
+	// runs and events simply wait in the outbox table until Kafka works and the API restarts.
+	producer, err := kafkax.NewProducer(cfg)
+	if err != nil {
+		log.Error("Kafka settings are invalid; ticket events will wait in the outbox", "err", err)
+	} else {
+		defer producer.Close()
+		go kafkax.EnsureTopics(ctx, producer, log, kafkax.Topics(cfg)...)
+		relay := &outbox.Relay{Pool: pool, Client: producer, Topic: cfg.KafkaTopic, Log: log}
+		go relay.Run(ctx)
+
+		// One-service deployments (e.g. Render free plan): send the emails from this process too.
+		if cfg.RunNotifier {
+			stopNotifier, err := notifier.Start(ctx, cfg, pool, producer, log)
+			if err != nil {
+				log.Error("could not start the email sender", "err", err)
+			} else {
+				defer stopNotifier()
+			}
+		}
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

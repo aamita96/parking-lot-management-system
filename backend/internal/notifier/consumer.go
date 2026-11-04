@@ -14,8 +14,10 @@ import (
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"plms/internal/config"
 	"plms/internal/domain"
 	"plms/internal/events"
+	"plms/internal/kafkax"
 	"plms/internal/platform/metrics"
 	"plms/internal/store"
 )
@@ -34,16 +36,19 @@ type Consumer struct {
 
 // NewGroupClient builds the consumer-group client. Offsets are committed manually, only after
 // the email row is stored (SRS 8.4).
-func NewGroupClient(brokers []string, group, topic string) (*kgo.Client, error) {
-	return kgo.NewClient(
-		kgo.SeedBrokers(brokers...),
-		kgo.ConsumerGroup(group),
-		kgo.ConsumeTopics(topic),
+func NewGroupClient(cfg config.Config) (*kgo.Client, error) {
+	opts, err := kafkax.ConnectionOptions(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return kgo.NewClient(append(opts,
+		kgo.ConsumerGroup(cfg.KafkaGroup),
+		kgo.ConsumeTopics(cfg.KafkaTopic),
 		kgo.DisableAutoCommit(),
 		kgo.BlockRebalanceOnPoll(),
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 		kgo.FetchMaxWait(500*time.Millisecond),
-	)
+	)...)
 }
 
 func (c *Consumer) Run(ctx context.Context) {

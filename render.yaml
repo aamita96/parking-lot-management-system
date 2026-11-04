@@ -1,0 +1,109 @@
+# Render Blueprint for PLMS. Render reads this file and creates everything in one go:
+#   Render Dashboard → New → Blueprint → pick this repository.
+# Step-by-step guide: DEPLOY.md
+#
+# What gets created (all on Render's free plan):
+#   plms-db   Postgres database
+#   plms-api  Go API (Docker). Also sends the emails (RUN_NOTIFIER=true), so no paid worker is needed.
+#   plms-web  React site (static). /api/* is forwarded to plms-api, so the browser sees one website.
+# Kafka is not offered by Render: use a hosted Kafka (e.g. Aiven's free plan) and paste its
+# connection details when Render asks for them.
+#
+# IMPORTANT: Render service URLs are https://<name>.onrender.com. If "plms-api" or "plms-web" is
+# already taken, Render adds a suffix. Then update the three URLs marked "← check" below and redeploy.
+
+databases:
+  - name: plms-db
+    plan: free
+    databaseName: plms
+    user: plms
+
+services:
+  - type: web
+    name: plms-api
+    runtime: docker
+    plan: free
+    region: singapore # closest region to India
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /healthz
+    envVars:
+      # "staging" keeps the simulator and on-screen demo codes available. Use "production" for a
+      # real car park (that also requires SIMULATOR_ENABLED=false and real email).
+      - key: APP_ENV
+        value: staging
+      - key: DATABASE_URL
+        fromDatabase:
+          name: plms-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CODE_HASH_SECRET
+        generateValue: true
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: PUBLIC_URL
+        value: https://plms-web.onrender.com # ← check: your plms-web URL (used in the gate QR code)
+      - key: CORS_ORIGINS
+        value: https://plms-web.onrender.com # ← check: your plms-web URL
+      - key: SIMULATOR_ENABLED
+        value: "true"
+      - key: SEED_DEMO
+        value: "true"
+      - key: RUN_NOTIFIER
+        value: "true"
+
+      # First admin login. Render asks for these when you create the Blueprint.
+      - key: ADMIN_BOOTSTRAP_EMAIL
+        sync: false
+      - key: ADMIN_BOOTSTRAP_PASSWORD
+        sync: false
+
+      # Kafka on Aiven: SASL login (SCRAM-SHA-256) over TLS. See DEPLOY.md step 1.
+      - key: KAFKA_BROKERS
+        value: kafka-26e67ac0-parking-lot-management-system.d.aivencloud.com:20023 # Aiven "Service URI"
+      - key: KAFKA_TLS
+        value: "true"
+      - key: KAFKA_SASL_MECHANISM
+        value: SCRAM-SHA-256
+      - key: KAFKA_USERNAME
+        sync: false # Aiven "User" (usually avnadmin)
+      - key: KAFKA_PASSWORD
+        sync: false # Aiven "Password" — never put it in this file
+      - key: KAFKA_CA_CERT
+        value: /etc/secrets/ca.pem # upload Aiven's CA certificate as a Render "Secret File" named ca.pem
+      - key: KAFKA_PARTITIONS
+        value: "2" # Aiven's free plan allows 2 partitions per topic
+      - key: KAFKA_REPLICATION_FACTOR
+        value: "-1" # use the Kafka provider's default
+
+      # Email. With EMAIL_ENABLED=false emails are only logged and the 6-digit code is shown on
+      # screen (fine for a demo, not for real use). For real email set EMAIL_ENABLED=true and the
+      # Resend values below, then set DEV_EXPOSE_CODES=false.
+      - key: EMAIL_ENABLED
+        value: "false"
+      - key: DEV_EXPOSE_CODES
+        value: "true"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        value: PLMS <onboarding@resend.dev>
+
+  - type: web
+    name: plms-web
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+    routes:
+      # 1. Forward API calls to the Go service. The browser only ever talks to plms-web, so the
+      #    admin login cookie keeps working (same website).
+      - type: rewrite
+        source: /api/*
+        destination: https://plms-api.onrender.com/api/* # ← check: your plms-api URL
+      # 2. Every other unknown path loads the React app, which shows the right page.
+      - type: rewrite
+        source: /*
+        destination: /index.html

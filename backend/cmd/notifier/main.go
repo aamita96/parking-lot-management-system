@@ -14,7 +14,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"plms/internal/config"
-	"plms/internal/email"
 	"plms/internal/kafkax"
 	"plms/internal/notifier"
 	"plms/internal/platform/db"
@@ -37,7 +36,7 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// The API owns migrations; wait for them so the tables exist.
+	// The API owns migrations; running them here too is harmless and makes sure the tables exist.
 	if err := db.Migrate(cfg.DatabaseURL); err != nil {
 		return err
 	}
@@ -47,45 +46,24 @@ func run(log *slog.Logger) error {
 	}
 	defer pool.Close()
 
-	producer, err := kafkax.NewProducer(cfg.KafkaBrokers)
+	producer, err := kafkax.NewProducer(cfg) // used for the dead-letter topic
 	if err != nil {
 		return err
 	}
 	defer producer.Close()
-	kafkax.EnsureTopics(ctx, producer, log,
-		kafkax.TopicSpec{Name: cfg.KafkaTopic, Partitions: cfg.KafkaPartitions, Replication: cfg.KafkaReplicationFactor,
-			RetentionMs: kafkax.Retention(7 * 24 * time.Hour)},
-		kafkax.TopicSpec{Name: cfg.KafkaDLQTopic, Partitions: 1, Replication: cfg.KafkaReplicationFactor,
-			RetentionMs: kafkax.Retention(14 * 24 * time.Hour)})
+	kafkax.EnsureTopics(ctx, producer, log, kafkax.Topics(cfg)...)
 
-	group, err := notifier.NewGroupClient(cfg.KafkaBrokers, cfg.KafkaGroup, cfg.KafkaTopic)
+	stopNotifier, err := notifier.Start(ctx, cfg, pool, producer, log)
 	if err != nil {
 		return err
 	}
-	defer group.Close()
-
-	var sender email.Sender = email.NewDevSender()
-	if cfg.EmailEnabled {
-		sender = email.NewResend(cfg.ResendAPIKey, cfg.EmailFrom, cfg.EmailReplyTo)
-	} else {
-		log.Warn("EMAIL_ENABLED=false: emails are logged, not sent")
-	}
-
-	nudge := make(chan struct{}, 1)
-	consumer := &notifier.Consumer{Pool: pool, Client: group, Producer: producer, DLQTopic: cfg.KafkaDLQTopic,
-		Group: cfg.KafkaGroup, Log: log, Nudge: nudge}
-	dispatcher := &notifier.Dispatcher{Pool: pool, Sender: sender, Producer: producer, DLQTopic: cfg.KafkaDLQTopic,
-		Log: log, Nudge: nudge}
-	go consumer.Run(ctx)
-	go dispatcher.Run(ctx)
-	go notifier.WatchLag(ctx, producer, cfg.KafkaGroup, log)
+	defer stopNotifier()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"status":"ok"}`)) })
 	mux.Handle("/metrics", promhttp.Handler())
 	srv := &http.Server{Addr: cfg.NotifierHTTPAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
-		log.Info("notifier running", "addr", cfg.NotifierHTTPAddr, "group", cfg.KafkaGroup, "email", cfg.EmailEnabled)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("metrics server failed", "err", err)
 		}

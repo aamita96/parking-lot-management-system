@@ -33,6 +33,14 @@ type Config struct {
 	KafkaPartitions        int32
 	KafkaReplicationFactor int16
 	KafkaGroup             string
+	// Login for managed Kafka (e.g. Aiven, Confluent). Leave empty for the local Docker Kafka.
+	KafkaSASLMechanism string // PLAIN | SCRAM-SHA-256 | SCRAM-SHA-512
+	KafkaUsername      string
+	KafkaPassword      string
+	KafkaTLS           bool
+	KafkaCACert        string // provider CA certificate: PEM text, or a file path (Aiven needs it)
+	KafkaClientCert    string // client certificate login (Aiven default): PEM text or file path
+	KafkaClientKey     string // private key for KafkaClientCert: PEM text or file path
 
 	EmailEnabled   bool
 	DevExposeCodes bool // only honoured when EmailEnabled=false
@@ -41,12 +49,15 @@ type Config struct {
 	EmailReplyTo   string
 
 	NotifierHTTPAddr string
+	// RunNotifier also runs the email sender inside the API process, so a small deployment
+	// (e.g. Render's free plan) needs one service instead of two.
+	RunNotifier bool
 }
 
 func Load() (Config, error) {
 	c := Config{
 		Env:         get("APP_ENV", "local"),
-		HTTPAddr:    get("HTTP_ADDR", ":8080"),
+		HTTPAddr:    httpAddr(),
 		DatabaseURL: get("DATABASE_URL", "postgres://plms:plms@localhost:5432/plms?sslmode=disable"),
 		CORSOrigins: list("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000"),
 		PublicURL:   strings.TrimRight(get("PUBLIC_URL", "http://localhost:5173"), "/"),
@@ -68,6 +79,13 @@ func Load() (Config, error) {
 		KafkaPartitions:        int32(integer("KAFKA_PARTITIONS", 6)),
 		KafkaReplicationFactor: int16(integer("KAFKA_REPLICATION_FACTOR", 1)),
 		KafkaGroup:             get("KAFKA_GROUP", "plms-notifications"),
+		KafkaSASLMechanism:     strings.ToUpper(get("KAFKA_SASL_MECHANISM", "")),
+		KafkaUsername:          get("KAFKA_USERNAME", ""),
+		KafkaPassword:          get("KAFKA_PASSWORD", ""),
+		KafkaTLS:               boolean("KAFKA_TLS", false),
+		KafkaCACert:            get("KAFKA_CA_CERT", ""),
+		KafkaClientCert:        get("KAFKA_CLIENT_CERT", ""),
+		KafkaClientKey:         get("KAFKA_CLIENT_KEY", ""),
 
 		EmailEnabled:   boolean("EMAIL_ENABLED", false),
 		DevExposeCodes: boolean("DEV_EXPOSE_CODES", false),
@@ -76,6 +94,7 @@ func Load() (Config, error) {
 		EmailReplyTo:   get("EMAIL_REPLY_TO", ""),
 
 		NotifierHTTPAddr: get("NOTIFIER_HTTP_ADDR", ":8081"),
+		RunNotifier:      boolean("RUN_NOTIFIER", false),
 	}
 	if len(c.JWTSecret) < 32 {
 		return c, fmt.Errorf("JWT_SECRET must be set to at least 32 characters")
@@ -90,6 +109,17 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("SIMULATOR_ENABLED must be false in production")
 	}
 	return c, nil
+}
+
+// httpAddr uses HTTP_ADDR if set, otherwise the PORT that hosts like Render provide, otherwise :8080.
+func httpAddr() string {
+	if addr := get("HTTP_ADDR", ""); addr != "" {
+		return addr
+	}
+	if port := get("PORT", ""); port != "" {
+		return ":" + port
+	}
+	return ":8080"
 }
 
 // ExposeDevCodes reports whether verification codes may be returned in API responses
