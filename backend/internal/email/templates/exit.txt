@@ -1,0 +1,17 @@
+Thanks for parking with us
+
+{{.VehicleNumber}} has left the car park. Here is your receipt.
+
+Ticket number:     {{.TicketNumber}}
+Vehicle:           {{.VehicleLine}}
+Spot:              {{.SpotLine}}
+Entry / exit time: {{.EntryExit}}
+Duration:          {{.DurationLine}}
+Fee breakdown:     {{.Breakdown}}
+Total:             {{.Total}}
+
+{{.PaidLine}}
+{{if .Simulated}}
+(Simulator test: this visit was created by the parking lot simulator.)
+{{end}}
+-- PLMS Parking

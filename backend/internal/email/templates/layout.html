@@ -1,0 +1,35 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Subject}}</title>
+</head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0f172a;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 0;">
+<tr><td align="center">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
+<tr><td style="background:#1e40af;padding:18px 24px;">
+  <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+    <td style="width:36px;height:36px;background:#ffffff;border-radius:8px;text-align:center;font-weight:800;font-size:22px;color:#1e40af;line-height:36px;">P</td>
+    <td style="padding-left:12px;color:#ffffff;font-size:18px;font-weight:700;">PLMS Parking</td>
+  </tr></table>
+</td></tr>
+<tr><td style="padding:24px;">
+{{template "content" .}}
+</td></tr>
+<tr><td style="padding:16px 24px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px;line-height:18px;">
+  {{if .Simulated}}<strong>Simulator test:</strong> this visit was created by the parking lot simulator.<br>{{end}}
+  You receive this email because a vehicle registered to this address used the PLMS car park.
+  All times are India Standard Time.
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>{{end}}
+
+{{define "row"}}<tr>
+  <td style="padding:8px 0;color:#64748b;font-size:14px;width:40%;vertical-align:top;">{{.Label}}</td>
+  <td style="padding:8px 0;font-size:14px;font-weight:600;vertical-align:top;">{{.Value}}</td>
+</tr>{{end}}

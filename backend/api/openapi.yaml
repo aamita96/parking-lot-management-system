@@ -1,0 +1,1080 @@
+openapi: 3.1.0
+info:
+  title: Parking Lot Management System API
+  version: 1.0.0
+  description: |
+    PLMS REST API (SRS section 7). All paths are under `/api/v1`. Errors use RFC 9457 Problem
+    Details (`application/problem+json`) with a stable `code` field.
+
+    Callers:
+    - **Owners** — `Authorization: Bearer <ownerToken>` from an email code (30 days).
+    - **Gate devices** — `X-Gate-Key: <device key>`.
+    - **Simulator** — admin bearer token plus `X-Gate-Id: SIM-IN | SIM-OUT` (only when `SIMULATOR_ENABLED=true`).
+    - **Admins** — `Authorization: Bearer <accessToken>` (15 min) with an HttpOnly refresh cookie (7 days).
+
+    All `/gate/*` calls accept an `Idempotency-Key` header; a repeated key within 24 hours returns the first response.
+servers:
+  - url: /api/v1
+tags:
+  - name: public
+  - name: owner
+  - name: gate
+  - name: admin
+  - name: simulator
+
+paths:
+  /availability:
+    get:
+      tags: [public]
+      summary: Open spots per panel (FR-10 to FR-13)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Availability' } } } }
+  /public/config:
+    get:
+      tags: [public]
+      summary: Feature flags the frontend needs
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PublicConfig' } } } }
+  /public/registrations:
+    post:
+      tags: [public]
+      summary: Start a registration; emails a 6-digit code (FR-1 to FR-5)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/VehicleInput' } } } }
+      responses:
+        '202': { description: Code sent, content: { application/json: { schema: { $ref: '#/components/schemas/RegistrationResult' } } } }
+        '200': { description: Already registered to this owner, content: { application/json: { schema: { $ref: '#/components/schemas/RegistrationResult' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /public/registrations/{id}/verify:
+    post:
+      tags: [public]
+      summary: Check the code; activates the vehicle and returns an owner token
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CodeInput' } } } }
+      responses:
+        '200': { description: Verified, content: { application/json: { schema: { $ref: '#/components/schemas/OwnerSession' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /public/registrations/{id}/resend:
+    post:
+      tags: [public]
+      summary: Send a new code for a pending registration
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '202': { description: Code sent, content: { application/json: { schema: { $ref: '#/components/schemas/RegistrationResult' } } } }
+        '429': { $ref: '#/components/responses/Problem' }
+  /public/sign-in:
+    post:
+      tags: [public]
+      summary: Email a sign-in code to a returning owner (FR-7)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EmailInput' } } } }
+      responses:
+        '202': { description: Code sent if the email is registered, content: { application/json: { schema: { $ref: '#/components/schemas/CodeStart' } } } }
+  /public/sign-in/verify:
+    post:
+      tags: [public]
+      summary: Exchange a sign-in code for an owner token
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CodeInput' } } } }
+      responses:
+        '200': { description: Signed in, content: { application/json: { schema: { $ref: '#/components/schemas/OwnerSession' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
+  /public/disputes:
+    post:
+      tags: [public]
+      summary: Report a number registered by someone else (FR-5)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DisputeInput' } } } }
+      responses:
+        '201': { description: Dispute opened, content: { application/json: { schema: { $ref: '#/components/schemas/DisputeResult' } } } }
+  /public/vehicles/{number}/check:
+    get:
+      tags: [public]
+      summary: Whether a number is valid and already registered (debounced form check)
+      parameters: [{ name: number, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/NumberCheck' } } } }
+
+  /me:
+    get:
+      tags: [owner]
+      security: [{ ownerToken: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OwnerView' } } } }
+    patch:
+      tags: [owner]
+      security: [{ ownerToken: [] }]
+      summary: Edit mobile number
+      requestBody: { content: { application/json: { schema: { type: object, properties: { mobile: { type: [string, 'null'] } } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OwnerView' } } } }
+  /me/token/refresh:
+    post:
+      tags: [owner]
+      security: [{ ownerToken: [] }]
+      responses:
+        '200': { description: New token, content: { application/json: { schema: { $ref: '#/components/schemas/OwnerSession' } } } }
+  /me/email-change:
+    post:
+      tags: [owner]
+      security: [{ ownerToken: [] }]
+      summary: Send a code to the new email (FR-7)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EmailInput' } } } }
+      responses:
+        '202': { description: Code sent, content: { application/json: { schema: { $ref: '#/components/schemas/CodeStart' } } } }
+  /me/email-change/verify:
+    post:
+      tags: [owner]
+      security: [{ ownerToken: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CodeInput' } } } }
+      responses:
+        '200': { description: Email changed, content: { application/json: { schema: { $ref: '#/components/schemas/OwnerSession' } } } }
+  /me/vehicles:
+    get:
+      tags: [owner]
+      security: [{ ownerToken: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/MyVehicle' } } } } } } }
+    post:
+      tags: [owner]
+      security: [{ ownerToken: [] }]
+      summary: Add a vehicle without a new code (FR-6)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/VehicleInput' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/MyVehicle' } } } }
+        '200': { description: Already yours, content: { application/json: { schema: { $ref: '#/components/schemas/MyVehicle' } } } }
+  /me/vehicles/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [owner]
+      security: [{ ownerToken: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/VehiclePatch' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/MyVehicle' } } } }
+    delete:
+      tags: [owner]
+      security: [{ ownerToken: [] }]
+      summary: Remove a vehicle that is not parked (FR-8)
+      responses:
+        '204': { description: Removed }
+        '409': { $ref: '#/components/responses/Problem' }
+  /me/tickets:
+    get:
+      tags: [owner]
+      security: [{ ownerToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/PageSize' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TicketPage' } } } }
+
+  /gate/entry-scans:
+    post:
+      tags: [gate]
+      security: [{ gateKey: [] }, { adminToken: [], gateId: [] }]
+      summary: Plate read at the IN gate (FR-14 to FR-19)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PlateInput' } } } }
+      responses:
+        '201': { description: Admitted, content: { application/json: { schema: { $ref: '#/components/schemas/EntryResponse' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /gate/exit-scans:
+    post:
+      tags: [gate]
+      security: [{ gateKey: [] }, { adminToken: [], gateId: [] }]
+      summary: Plate read at the PAY kiosk; locks the fee (FR-21)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ExitInput' } } } }
+      responses:
+        '200': { description: Fee locked or closed, content: { application/json: { schema: { $ref: '#/components/schemas/ExitResponse' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+  /gate/payments:
+    post:
+      tags: [gate]
+      security: [{ gateKey: [] }, { adminToken: [], gateId: [] }]
+      summary: Record a simulated payment; closes the ticket (FR-23, FR-26)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PaymentInput' } } } }
+      responses:
+        '200': { description: Paid, content: { application/json: { schema: { $ref: '#/components/schemas/Receipt' } } } }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /admin/auth/login:
+    post:
+      tags: [admin]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AdminLogin' } } } }
+      responses:
+        '200': { description: Signed in; sets the refresh cookie, content: { application/json: { schema: { $ref: '#/components/schemas/AdminSession' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /admin/auth/refresh:
+    post:
+      tags: [admin]
+      summary: New access token from the HttpOnly refresh cookie
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AdminSession' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /admin/auth/logout:
+    post:
+      tags: [admin]
+      responses: { '204': { description: Cookie cleared } }
+  /admin/simulator/layout:
+    get:
+      tags: [simulator]
+      security: [{ adminToken: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Layout' } } } }
+  /admin/simulator/events:
+    get:
+      tags: [simulator]
+      security: [{ adminToken: [] }]
+      parameters: [{ name: limit, in: query, schema: { type: integer, default: 20 } }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/EventSummary' } } } } } } }
+  /admin/simulator/reset:
+    post:
+      tags: [simulator]
+      security: [{ adminToken: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [cancelledTickets], properties: { cancelledTickets: { type: integer } } } } } }
+  /admin/exceptions:
+    get:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Exceptions' } } } }
+  /admin/exceptions/scans/{id}/resolve:
+    post:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReasonInput' } } } }
+      responses: { '200': { description: Resolved } }
+  /admin/disputes/{id}/resolve:
+    post:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReasonInput' } } } }
+      responses: { '200': { description: Resolved } }
+  /admin/tickets:
+    get:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, ACTIVE, PAYMENT_PENDING, CLOSED, CANCELLED] } }
+        - { name: simulated, in: query, schema: { type: boolean } }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TicketPage' } } } }
+    post:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      summary: Manual check-in (FR-38)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ManualCheckIn' } } } }
+      responses:
+        '201': { description: Ticket opened, content: { application/json: { schema: { $ref: '#/components/schemas/Ticket' } } } }
+  /admin/tickets/{id}:
+    get:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TicketDetail' } } } }
+  /admin/tickets/{id}/manual-exit:
+    post:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ManualExit' } } } }
+      responses:
+        '200': { description: Closed, content: { application/json: { schema: { $ref: '#/components/schemas/Ticket' } } } }
+  /admin/tickets/{id}/notifications/{kind}/resend:
+    post:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      summary: Resend the entry or exit email (FR-32)
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [entry, exit, ENTRY, EXIT] } }
+      responses:
+        '202': { description: Re-queued, content: { application/json: { schema: { $ref: '#/components/schemas/EmailNotification' } } } }
+  /admin/owners:
+    get:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      parameters: [{ name: q, in: query, schema: { type: string } }, { $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/PageSize' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OwnerPage' } } } }
+  /admin/vehicles:
+    get:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/VehicleStatus' } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/VehicleType' } }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/VehiclePage' } } } }
+  /admin/vehicles/{id}:
+    patch:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      summary: Reassign a vehicle to its rightful owner (FR-38)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reassign' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Vehicle' } } } }
+  /admin/spots:
+    get:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Spot' } } } } } } }
+    post:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      summary: Create one spot or a range of positions (FR-33)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SpotInput' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Spot' } } } } } } }
+  /admin/spots/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      summary: Out of service / back in service, or change type (FR-34)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SpotPatch' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Spot' } } } }
+        '409': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      responses: { '204': { description: Deleted }, '409': { $ref: '#/components/responses/Problem' } }
+  /admin/pricing:
+    get:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/PricingRule' } } } } } } }
+  /admin/pricing/{vehicleType}:
+    parameters: [{ name: vehicleType, in: path, required: true, schema: { $ref: '#/components/schemas/VehicleType' } }]
+    get:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PricingView' } } } }
+    put:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      summary: New rate card version; applies to tickets opened afterwards (FR-35)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PricingInput' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PricingRule' } } } }
+  /admin/settings:
+    get:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Settings' } } } }
+  /admin/settings/overflow:
+    put:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      summary: Toggle overflow allocation (FR-36)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [enabled], properties: { enabled: { type: boolean }, reason: { type: string } } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Settings' } } } }
+  /admin/gate-devices:
+    get:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/GateDevice' } } } } } } }
+    post:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      summary: Register a device; the API key is returned once (FR-37)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/GateInput' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/GateWithKey' } } } }
+  /admin/gate-devices/{id}:
+    patch:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/GatePatch' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/GateDevice' } } } }
+  /admin/gate-devices/{id}/rotate-key:
+    post:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: New key (shown once), content: { application/json: { schema: { $ref: '#/components/schemas/GateWithKey' } } } }
+  /admin/audit:
+    get:
+      tags: [admin]
+      security: [{ adminToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/PageSize' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuditPage' } } } }
+  /healthz:
+    get:
+      summary: Liveness
+      responses: { '200': { description: OK } }
+  /readyz:
+    get:
+      summary: Readiness (database reachable)
+      responses: { '200': { description: OK }, '503': { description: Not ready } }
+
+components:
+  securitySchemes:
+    ownerToken: { type: http, scheme: bearer, bearerFormat: JWT }
+    adminToken: { type: http, scheme: bearer, bearerFormat: JWT }
+    gateKey: { type: apiKey, in: header, name: X-Gate-Key }
+    gateId: { type: apiKey, in: header, name: X-Gate-Id }
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    Page: { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+    PageSize: { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 25 } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, schema: { type: string, maxLength: 100 } }
+  responses:
+    Problem:
+      description: Problem Details
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code, detail]
+      additionalProperties: true
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string, examples: [NOT_REGISTERED, NO_SPOT_AVAILABLE, VALIDATION_ERROR] }
+        detail: { type: string }
+        message: { type: string }
+        instance: { type: string }
+        traceId: { type: string }
+        errors: { type: array, items: { $ref: '#/components/schemas/FieldError' } }
+        result: { type: string, enum: [REJECTED] }
+        plate: { type: string }
+        registerUrl: { type: string }
+        receipt: { $ref: '#/components/schemas/Receipt' }
+        attemptsLeft: { type: integer }
+        canDispute: { type: boolean }
+        feePaise: { type: integer }
+    FieldError:
+      type: object
+      required: [field, message]
+      properties: { field: { type: string }, message: { type: string } }
+
+    VehicleType: { type: string, enum: [MOTORCYCLE, CAR, TRUCK] }
+    SpotType: { type: string, enum: [COMPACT, REGULAR, OVERSIZED] }
+    VehicleStatus: { type: string, enum: [PENDING_VERIFICATION, ACTIVE, REMOVED] }
+    SpotStatus: { type: string, enum: [AVAILABLE, OCCUPIED, OUT_OF_SERVICE] }
+    TicketStatus: { type: string, enum: [ACTIVE, PAYMENT_PENDING, CLOSED, CANCELLED] }
+    GateKind: { type: string, enum: [ENTRY, EXIT] }
+    EmailStatus: { type: string, enum: [WAITING, QUEUED, SENT, FAILED, DEFERRED] }
+
+    Rate:
+      type: object
+      required: [hourlyRatePaise, dailyCapPaise, graceMinutes]
+      properties:
+        hourlyRatePaise: { type: integer }
+        dailyCapPaise: { type: integer }
+        graceMinutes: { type: integer }
+    Fee:
+      type: object
+      required: [durationMinutes, billableHours, withinGrace, fullDays, remainderHours, remainderPaise, remainderCapped, feePaise]
+      properties:
+        durationMinutes: { type: integer }
+        billableHours: { type: integer }
+        withinGrace: { type: boolean }
+        fullDays: { type: integer }
+        remainderHours: { type: integer }
+        remainderPaise: { type: integer }
+        remainderCapped: { type: boolean }
+        feePaise: { type: integer }
+
+    PublicConfig:
+      type: object
+      required: [simulatorEnabled, devCodes, publicUrl]
+      properties:
+        simulatorEnabled: { type: boolean }
+        devCodes: { type: boolean, description: Codes are returned in responses (local demos without email) }
+        publicUrl: { type: string }
+
+    FreeSpot:
+      type: object
+      required: [code, spotType, floor, overflow]
+      properties:
+        code: { type: string }
+        spotType: { $ref: '#/components/schemas/SpotType' }
+        floor: { type: integer }
+        overflow: { type: boolean }
+    Panel:
+      type: object
+      required: [vehicleType, label, spotType, available, total, occupied, outOfService, overflowAvailable, full, freeSpots]
+      properties:
+        vehicleType: { $ref: '#/components/schemas/VehicleType' }
+        label: { type: string }
+        spotType: { $ref: '#/components/schemas/SpotType' }
+        available: { type: integer }
+        total: { type: integer }
+        occupied: { type: integer }
+        outOfService: { type: integer }
+        overflowAvailable: { type: integer }
+        full: { type: boolean }
+        freeSpots: { type: array, items: { $ref: '#/components/schemas/FreeSpot' } }
+    Availability:
+      type: object
+      required: [asOf, overflowEnabled, panels]
+      properties:
+        asOf: { type: string, format: date-time }
+        overflowEnabled: { type: boolean }
+        panels: { type: array, items: { $ref: '#/components/schemas/Panel' } }
+
+    VehicleInput:
+      type: object
+      required: [vehicleNumber, vehicleType]
+      properties:
+        vehicleNumber: { type: string, examples: ['KA 01 AB 1234'] }
+        vehicleType: { $ref: '#/components/schemas/VehicleType' }
+        ownerEmail: { type: string, format: email, description: Required for /public/registrations }
+        mobile: { type: [string, 'null'] }
+        registrationId: { type: [string, 'null'] }
+    VehicleSummary:
+      type: object
+      required: [id, vehicleNumber, vehicleType, status]
+      properties:
+        id: { type: string }
+        vehicleNumber: { type: string }
+        vehicleType: { $ref: '#/components/schemas/VehicleType' }
+        status: { $ref: '#/components/schemas/VehicleStatus' }
+    RegistrationResult:
+      type: object
+      required: [status, vehicleNumber]
+      properties:
+        status: { type: string, enum: [CODE_SENT, ALREADY_REGISTERED] }
+        registrationId: { type: string }
+        vehicleNumber: { type: string }
+        codeSentTo: { type: string }
+        codeExpiresAt: { type: string, format: date-time }
+        resendAfterSeconds: { type: integer }
+        vehicle: { $ref: '#/components/schemas/VehicleSummary' }
+        devCode: { type: string, description: Local demos only }
+    CodeInput:
+      type: object
+      required: [code]
+      properties: { code: { type: string }, email: { type: string } }
+    EmailInput:
+      type: object
+      required: [email]
+      properties: { email: { type: string } }
+    CodeStart:
+      type: object
+      required: [codeSentTo, resendAfterSeconds]
+      properties:
+        codeSentTo: { type: string }
+        codeExpiresAt: { type: string, format: date-time }
+        resendAfterSeconds: { type: integer }
+        devCode: { type: string }
+    OwnerView:
+      type: object
+      required: [id, email, mobile, verified]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        mobile: { type: [string, 'null'] }
+        verified: { type: boolean }
+    OwnerSession:
+      type: object
+      required: [owner, ownerToken, expiresAt]
+      properties:
+        owner: { $ref: '#/components/schemas/OwnerView' }
+        ownerToken: { type: string }
+        expiresAt: { type: string, format: date-time }
+        vehicle: { $ref: '#/components/schemas/VehicleSummary' }
+    DisputeInput:
+      type: object
+      required: [vehicleNumber, reporterEmail]
+      properties:
+        vehicleNumber: { type: string }
+        reporterEmail: { type: string }
+        mobile: { type: [string, 'null'] }
+        registrationId: { type: [string, 'null'] }
+        message: { type: string }
+    DisputeResult:
+      type: object
+      required: [disputeId, status, message]
+      properties: { disputeId: { type: string }, status: { type: string }, message: { type: string } }
+    NumberCheck:
+      type: object
+      required: [vehicleNumber, valid, registered]
+      properties: { vehicleNumber: { type: string }, valid: { type: boolean }, registered: { type: boolean } }
+
+    Vehicle:
+      type: object
+      required: [id, vehicleNumber, vehicleType, ownerId, ownerEmail, registrationId, status, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        vehicleNumber: { type: string }
+        vehicleType: { $ref: '#/components/schemas/VehicleType' }
+        ownerId: { type: string }
+        ownerEmail: { type: string }
+        registrationId: { type: [string, 'null'] }
+        status: { $ref: '#/components/schemas/VehicleStatus' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    MyVehicle:
+      allOf:
+        - { $ref: '#/components/schemas/Vehicle' }
+        - type: object
+          properties:
+            activeTicket: { oneOf: [{ $ref: '#/components/schemas/Ticket' }, { type: 'null' }] }
+    VehiclePatch:
+      type: object
+      properties:
+        registrationId: { type: [string, 'null'] }
+        mobile: { type: [string, 'null'] }
+    VehiclePage:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Vehicle' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+    OwnerSummary:
+      type: object
+      required: [id, email, mobile, emailVerifiedAt, createdAt, vehicleCount, vehicles]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        mobile: { type: [string, 'null'] }
+        emailVerifiedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+        vehicleCount: { type: integer }
+        vehicles: { type: array, items: { $ref: '#/components/schemas/Vehicle' } }
+    OwnerPage:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OwnerSummary' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+
+    Ticket:
+      type: object
+      required: [id, ticketNumber, vehicleId, spotId, pricingRuleId, entryGateId, exitGateId, vehicleType, spotType, ownerEmail,
+        entryTime, exitTime, durationMinutes, billableHours, feePaise, paidPaise, paymentMethod, paidAt, status, isSimulated,
+        source, vehicleNumber, ownerId, spotCode, spotFloor, spotRow, spotPosition, rate]
+      properties:
+        id: { type: string }
+        ticketNumber: { type: string, examples: [PLM-20261104-000123] }
+        vehicleId: { type: string }
+        spotId: { type: string }
+        pricingRuleId: { type: string }
+        entryGateId: { type: [string, 'null'] }
+        exitGateId: { type: [string, 'null'] }
+        vehicleType: { $ref: '#/components/schemas/VehicleType' }
+        spotType: { $ref: '#/components/schemas/SpotType' }
+        ownerEmail: { type: string }
+        entryTime: { type: string, format: date-time }
+        exitTime: { type: [string, 'null'], format: date-time }
+        durationMinutes: { type: [integer, 'null'] }
+        billableHours: { type: [integer, 'null'] }
+        feePaise: { type: [integer, 'null'] }
+        paidPaise: { type: [integer, 'null'] }
+        paymentMethod: { type: [string, 'null'] }
+        paidAt: { type: [string, 'null'], format: date-time }
+        status: { $ref: '#/components/schemas/TicketStatus' }
+        isSimulated: { type: boolean }
+        source: { type: string, enum: [GATE, SIMULATOR, ADMIN] }
+        vehicleNumber: { type: string }
+        ownerId: { type: string }
+        spotCode: { type: string }
+        spotFloor: { type: integer }
+        spotRow: { type: string }
+        spotPosition: { type: integer }
+        rate: { $ref: '#/components/schemas/Rate' }
+    TicketPage:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Ticket' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+    EmailNotification:
+      type: object
+      required: [id, eventId, ticketId, kind, recipient, status, providerMessageId, attempts, lastError, nextAttemptAt, createdAt, sentAt]
+      properties:
+        id: { type: string }
+        eventId: { type: string }
+        ticketId: { type: string }
+        kind: { type: string, enum: [ENTRY, EXIT] }
+        recipient: { type: string }
+        status: { type: string, enum: [QUEUED, SENT, FAILED, DEFERRED] }
+        providerMessageId: { type: [string, 'null'] }
+        attempts: { type: integer }
+        lastError: { type: [string, 'null'] }
+        nextAttemptAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+        sentAt: { type: [string, 'null'], format: date-time }
+    TicketDetail:
+      allOf:
+        - { $ref: '#/components/schemas/Ticket' }
+        - type: object
+          required: [notifications, events]
+          properties:
+            notifications: { type: array, items: { $ref: '#/components/schemas/EmailNotification' } }
+            events: { type: array, items: { $ref: '#/components/schemas/EventSummary' } }
+            breakdown: { type: string }
+
+    PlateInput:
+      type: object
+      required: [plate]
+      properties: { plate: { type: string, examples: [KA01AB1234] } }
+    ExitInput:
+      type: object
+      required: [plate]
+      properties:
+        plate: { type: string }
+        simulatedStayMinutes: { type: integer, minimum: 0, description: Simulator tickets only (FR-44) }
+    PaymentInput:
+      type: object
+      required: [ticketId, amountPaise, method]
+      properties:
+        ticketId: { type: string }
+        amountPaise: { type: integer }
+        method: { type: string, enum: [SIMULATED_UPI, SIMULATED_CASH] }
+    GateTicket:
+      type: object
+      required: [id, ticketNumber, status, entryTime, isSimulated]
+      properties:
+        id: { type: string }
+        ticketNumber: { type: string }
+        status: { $ref: '#/components/schemas/TicketStatus' }
+        entryTime: { type: string, format: date-time }
+        isSimulated: { type: boolean }
+    GateVehicle:
+      type: object
+      required: [vehicleNumber, vehicleType]
+      properties:
+        vehicleNumber: { type: string }
+        vehicleType: { $ref: '#/components/schemas/VehicleType' }
+    GateOwner:
+      type: object
+      required: [emailMasked]
+      properties:
+        email: { type: string, description: Simulator and admin callers only (FR-20) }
+        emailMasked: { type: string }
+    GateSpot:
+      type: object
+      required: [code, spotType, rowLabel, position, floor]
+      properties:
+        code: { type: string }
+        spotType: { $ref: '#/components/schemas/SpotType' }
+        rowLabel: { type: string }
+        position: { type: integer }
+        floor: { type: integer }
+    EntryResponse:
+      type: object
+      required: [result, ticket, vehicle, owner, spot, rate]
+      properties:
+        result: { type: string, enum: [ADMITTED] }
+        ticket: { $ref: '#/components/schemas/GateTicket' }
+        vehicle: { $ref: '#/components/schemas/GateVehicle' }
+        owner: { $ref: '#/components/schemas/GateOwner' }
+        spot: { $ref: '#/components/schemas/GateSpot' }
+        rate: { $ref: '#/components/schemas/Rate' }
+        deduplicated: { type: boolean }
+    ExitResponse:
+      type: object
+      required: [result, ticket, vehicle, owner, spot, entryTime, exitTime, durationMinutes, billableHours, feePaise, currency, breakdown, fee, rate, openBarrier]
+      properties:
+        result: { type: string, enum: [EXIT_PENDING_PAYMENT, EXIT_CLOSED] }
+        ticket: { $ref: '#/components/schemas/GateTicket' }
+        vehicle: { $ref: '#/components/schemas/GateVehicle' }
+        owner: { $ref: '#/components/schemas/GateOwner' }
+        spot: { $ref: '#/components/schemas/GateSpot' }
+        entryTime: { type: string, format: date-time }
+        exitTime: { type: string, format: date-time }
+        durationMinutes: { type: integer }
+        billableHours: { type: integer }
+        feePaise: { type: integer }
+        currency: { type: string, enum: [INR] }
+        breakdown: { type: string, examples: ['4 h × ₹40 = ₹160.00'] }
+        fee: { $ref: '#/components/schemas/Fee' }
+        rate: { $ref: '#/components/schemas/Rate' }
+        openBarrier: { type: boolean }
+        paidPaise: { type: integer }
+        paymentMethod: { type: string }
+        paidAt: { type: string, format: date-time }
+        deduplicated: { type: boolean }
+    Receipt:
+      type: object
+      required: [result, ticketId, ticketNumber, status, vehicleNumber, feePaise, paidPaise, paymentMethod, paidAt, openBarrier]
+      properties:
+        result: { type: string, enum: [EXIT_CLOSED] }
+        ticketId: { type: string }
+        ticketNumber: { type: string }
+        status: { $ref: '#/components/schemas/TicketStatus' }
+        vehicleNumber: { type: string }
+        feePaise: { type: integer }
+        paidPaise: { type: integer }
+        paymentMethod: { type: string }
+        paidAt: { type: [string, 'null'], format: date-time }
+        openBarrier: { type: boolean }
+
+    AdminLogin:
+      type: object
+      required: [email, password]
+      properties: { email: { type: string }, password: { type: string } }
+    AdminView:
+      type: object
+      required: [id, email, name]
+      properties: { id: { type: string }, email: { type: string }, name: { type: string } }
+    AdminSession:
+      type: object
+      required: [admin, accessToken, expiresAt]
+      properties:
+        admin: { $ref: '#/components/schemas/AdminView' }
+        accessToken: { type: string }
+        expiresAt: { type: string, format: date-time }
+
+    LayoutVehicle:
+      type: object
+      required: [vehicleId, vehicleNumber, vehicleType, colorSeed, ownerEmail, ticketId, ticketNumber, ticketStatus, entryTime, isSimulated, rate]
+      properties:
+        vehicleId: { type: string }
+        vehicleNumber: { type: string }
+        vehicleType: { $ref: '#/components/schemas/VehicleType' }
+        colorSeed: { type: string }
+        ownerEmail: { type: string }
+        ticketId: { type: string }
+        ticketNumber: { type: string }
+        ticketStatus: { $ref: '#/components/schemas/TicketStatus' }
+        entryTime: { type: string, format: date-time }
+        isSimulated: { type: boolean }
+        rate: { $ref: '#/components/schemas/Rate' }
+    LayoutSpot:
+      type: object
+      required: [id, code, spotType, letter, position, status, vehicle]
+      properties:
+        id: { type: string }
+        code: { type: string }
+        spotType: { $ref: '#/components/schemas/SpotType' }
+        letter: { type: string, enum: [C, R, L] }
+        position: { type: integer }
+        status: { $ref: '#/components/schemas/SpotStatus' }
+        vehicle: { oneOf: [{ $ref: '#/components/schemas/LayoutVehicle' }, { type: 'null' }] }
+    LayoutRow:
+      type: object
+      required: [floor, rowLabel, spots]
+      properties:
+        floor: { type: integer }
+        rowLabel: { type: string }
+        spots: { type: array, items: { $ref: '#/components/schemas/LayoutSpot' } }
+    Layout:
+      type: object
+      required: [asOf, freeCount, floors, rows, gates]
+      properties:
+        asOf: { type: string, format: date-time }
+        freeCount: { type: integer }
+        floors: { type: array, items: { type: integer } }
+        rows: { type: array, items: { $ref: '#/components/schemas/LayoutRow' } }
+        gates: { type: array, items: { type: object, required: [name, kind], properties: { name: { type: string }, kind: { $ref: '#/components/schemas/GateKind' } } } }
+    EventSummary:
+      type: object
+      required: [eventId, eventType, ticketId, ticketNumber, vehicleNumber, spotCode, simulated, occurredAt, publishedAt, publishAttempts, publishError, kafkaStatus, emailStatus, feePaise]
+      properties:
+        eventId: { type: string }
+        eventType: { type: string, enum: [VehicleEntered, VehicleExited] }
+        ticketId: { type: string }
+        ticketNumber: { type: string }
+        vehicleNumber: { type: string }
+        spotCode: { type: string }
+        simulated: { type: boolean }
+        occurredAt: { type: string, format: date-time }
+        publishedAt: { type: [string, 'null'], format: date-time }
+        publishAttempts: { type: integer }
+        publishError: { type: [string, 'null'] }
+        kafkaStatus: { type: string, enum: [PENDING, PUBLISHED, RETRYING] }
+        emailStatus: { $ref: '#/components/schemas/EmailStatus' }
+        feePaise: { type: [integer, 'null'] }
+
+    Scan:
+      type: object
+      required: [id, gateId, gateName, gateKind, plateRaw, plateNormalised, result, rejectReason, ticketId, scannedAt, deduplicated, resolvedAt, resolution]
+      properties:
+        id: { type: integer }
+        gateId: { type: string }
+        gateName: { type: string }
+        gateKind: { $ref: '#/components/schemas/GateKind' }
+        plateRaw: { type: string }
+        plateNormalised: { type: [string, 'null'] }
+        result: { type: string }
+        rejectReason: { type: [string, 'null'] }
+        ticketId: { type: [string, 'null'] }
+        scannedAt: { type: string, format: date-time }
+        deduplicated: { type: boolean }
+        resolvedAt: { type: [string, 'null'], format: date-time }
+        resolution: { type: [string, 'null'] }
+    AdminAction:
+      type: object
+      required: [id, adminId, adminEmail, action, targetType, targetId, reason, details, createdAt, resolvedAt, resolution]
+      properties:
+        id: { type: string }
+        adminId: { type: [string, 'null'] }
+        adminEmail: { type: [string, 'null'] }
+        action: { type: string }
+        targetType: { type: string }
+        targetId: { type: [string, 'null'] }
+        reason: { type: [string, 'null'] }
+        details: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: [string, 'null'], format: date-time }
+        resolution: { type: [string, 'null'] }
+    AuditPage:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AdminAction' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+    Exceptions:
+      type: object
+      required: [rejectedScans, unpaidTickets, disputes, counts]
+      properties:
+        rejectedScans: { type: array, items: { $ref: '#/components/schemas/Scan' } }
+        unpaidTickets: { type: array, items: { $ref: '#/components/schemas/Ticket' } }
+        disputes: { type: array, items: { $ref: '#/components/schemas/AdminAction' } }
+        counts: { type: object, additionalProperties: { type: integer } }
+    ReasonInput:
+      type: object
+      required: [reason]
+      properties: { reason: { type: string, minLength: 3 } }
+    ManualCheckIn:
+      type: object
+      required: [vehicleNumber, reason]
+      properties:
+        vehicleNumber: { type: string }
+        spotId: { type: string }
+        reason: { type: string }
+        scanId: { type: integer }
+    ManualExit:
+      type: object
+      required: [mode, reason]
+      properties:
+        mode: { type: string, enum: [CHARGE, WAIVE] }
+        reason: { type: string }
+    Reassign:
+      type: object
+      required: [ownerEmail, reason]
+      properties:
+        ownerEmail: { type: string }
+        reason: { type: string }
+        disputeId: { type: string }
+
+    Spot:
+      type: object
+      required: [id, code, spotType, floor, rowLabel, position, status, version]
+      properties:
+        id: { type: string }
+        code: { type: string }
+        spotType: { $ref: '#/components/schemas/SpotType' }
+        floor: { type: integer }
+        rowLabel: { type: string }
+        position: { type: integer }
+        status: { $ref: '#/components/schemas/SpotStatus' }
+        version: { type: integer }
+    SpotInput:
+      type: object
+      required: [spotType, rowLabel]
+      properties:
+        spotType: { $ref: '#/components/schemas/SpotType' }
+        floor: { type: integer, default: 0 }
+        rowLabel: { type: string, pattern: '^[A-Za-z]$' }
+        position: { type: integer, description: Single spot }
+        fromPosition: { type: integer, description: Bulk range start }
+        toPosition: { type: integer, description: Bulk range end }
+        code: { type: string, description: Optional custom code for a single spot }
+    SpotPatch:
+      type: object
+      properties:
+        status: { type: string, enum: [AVAILABLE, OUT_OF_SERVICE] }
+        spotType: { $ref: '#/components/schemas/SpotType' }
+        reason: { type: string }
+
+    PricingRule:
+      type: object
+      required: [id, vehicleType, hourlyRatePaise, dailyCapPaise, graceMinutes, effectiveFrom, effectiveTo]
+      properties:
+        id: { type: string }
+        vehicleType: { $ref: '#/components/schemas/VehicleType' }
+        hourlyRatePaise: { type: integer }
+        dailyCapPaise: { type: integer }
+        graceMinutes: { type: integer }
+        effectiveFrom: { type: string, format: date-time }
+        effectiveTo: { type: [string, 'null'], format: date-time }
+    PricingView:
+      type: object
+      required: [current, history]
+      properties:
+        current: { $ref: '#/components/schemas/PricingRule' }
+        history: { type: array, items: { $ref: '#/components/schemas/PricingRule' } }
+    PricingInput:
+      type: object
+      required: [hourlyRatePaise, dailyCapPaise, graceMinutes]
+      properties:
+        hourlyRatePaise: { type: integer, minimum: 0 }
+        dailyCapPaise: { type: integer, minimum: 0 }
+        graceMinutes: { type: integer, minimum: 0, maximum: 120 }
+        reason: { type: string }
+    Settings:
+      type: object
+      required: [overflowEnabled, simulatorEnabled]
+      properties:
+        overflowEnabled: { type: boolean }
+        simulatorEnabled: { type: boolean }
+
+    GateDevice:
+      type: object
+      required: [id, name, kind, isSimulator, active, hasKey, lastSeenAt, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { $ref: '#/components/schemas/GateKind' }
+        isSimulator: { type: boolean }
+        active: { type: boolean }
+        hasKey: { type: boolean }
+        lastSeenAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+    GateWithKey:
+      allOf:
+        - { $ref: '#/components/schemas/GateDevice' }
+        - type: object
+          properties:
+            apiKey: { type: string, description: Shown once; store it on the device }
+    GateInput:
+      type: object
+      required: [name, kind]
+      properties:
+        name: { type: string, examples: [IN-2] }
+        kind: { $ref: '#/components/schemas/GateKind' }
+    GatePatch:
+      type: object
+      properties:
+        name: { type: string }
+        active: { type: boolean }

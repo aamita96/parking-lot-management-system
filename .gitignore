@@ -1,0 +1,9 @@
+.env
+*.exe
+*.test
+*.out
+coverage*
+node_modules
+dist
+test-results
+playwright-report

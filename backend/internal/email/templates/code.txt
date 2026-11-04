@@ -1,0 +1,10 @@
+{{.Heading}}
+
+{{.Intro}}
+
+Your code: {{.Code}} (valid {{.ValidMinutes}} minutes)
+{{if .VehicleNumber}}Vehicle being registered: {{.VehicleLine}}
+{{end}}
+{{.SafetyLine}}
+
+-- PLMS Parking

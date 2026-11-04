@@ -1,0 +1,59 @@
+@import 'tailwindcss';
+
+/* PLMS design tokens: parking-sign blue, warm amber accents, slate neutrals. */
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Code', Consolas, monospace;
+
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-200: #bfdbfe;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+  --color-brand-800: #1e40af;
+  --color-brand-900: #1e3a8a;
+
+  --color-accent-400: #fbbf24;
+  --color-accent-500: #f59e0b;
+
+  /* Lot drawing palette */
+  --color-asphalt: #3f4651;
+  --color-asphalt-dark: #343a43;
+  --color-lane-line: #f8fafc;
+  --color-grass: #6fbf73;
+  --color-grass-dark: #4e9f55;
+
+  --radius-xl: 0.875rem;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.06), 0 1px 3px rgb(15 23 42 / 0.08);
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-600;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hatched fill for out-of-service spots in tables/legends. */
+@utility hatched {
+  background-image: repeating-linear-gradient(45deg, rgb(148 163 184 / 0.35) 0 6px, transparent 6px 12px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

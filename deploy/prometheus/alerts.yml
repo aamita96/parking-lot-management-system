@@ -1,0 +1,39 @@
+# Prometheus alert rules for PLMS (SRS NFR-13). Metrics are exposed on
+#   API:      http://api:8080/metrics
+#   Notifier: http://notifier:8081/metrics
+groups:
+  - name: plms
+    rules:
+      - alert: PLMSOutboxLagHigh
+        expr: plms_outbox_lag_seconds > 120
+        for: 1m
+        labels: { severity: page }
+        annotations:
+          summary: Ticket events are not reaching Kafka
+          description: The oldest unpublished outbox event is {{ $value | humanizeDuration }} old. Check Kafka and the relay logs.
+
+      - alert: PLMSConsumerLagHigh
+        expr: plms_consumer_lag_messages > 1000
+        for: 5m
+        labels: { severity: warn }
+        annotations:
+          summary: Notification consumer is falling behind
+          description: Consumer group plms-notifications is {{ $value }} messages behind.
+
+      - alert: PLMSEmailFailureRateHigh
+        expr: |
+          sum(increase(plms_emails_total{status="FAILED"}[15m]))
+            / clamp_min(sum(increase(plms_emails_total{status=~"SENT|FAILED"}[15m])), 1) > 0.10
+        for: 5m
+        labels: { severity: warn }
+        annotations:
+          summary: More than 10% of entry/exit emails failed in 15 minutes
+          description: Check the Resend API key, domain verification and quota.
+
+      - alert: PLMSSpotTypeFull
+        expr: plms_occupancy_ratio >= 1
+        for: 1m
+        labels: { severity: info }
+        annotations:
+          summary: "{{ $labels.spot_type }} spots are 100% occupied"
+          description: Vehicles of this type are being refused unless overflow is on.

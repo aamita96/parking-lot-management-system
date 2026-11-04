@@ -1,0 +1,21 @@
+{{define "content"}}
+<h1 style="margin:0 0 8px;font-size:20px;">You're checked in</h1>
+<p style="margin:0 0 16px;color:#334155;font-size:15px;line-height:22px;">
+  {{.VehicleNumber}} entered the car park and is parked at spot <strong>{{.SpotCode}}</strong>.
+</p>
+<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 16px;margin:0 0 16px;">
+  <div style="color:#1e40af;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Your spot</div>
+  <div style="font-size:30px;font-weight:800;color:#0f172a;">{{.SpotCode}}</div>
+  <div style="color:#334155;font-size:14px;">{{.SpotLine}}</div>
+</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e2e8f0;">
+  {{template "row" (row "Ticket number" .TicketNumber)}}
+  {{template "row" (row "Vehicle" .VehicleLine)}}
+  {{template "row" (row "Spot" .SpotLine)}}
+  {{template "row" (row "Entry time" .EntryTime)}}
+  {{template "row" (row "Rate" .Rate)}}
+</table>
+<p style="margin:20px 0 0;color:#64748b;font-size:13px;line-height:20px;">
+  Pay at the PAY kiosk on your way out. We'll email your receipt when you leave.
+</p>
+{{end}}

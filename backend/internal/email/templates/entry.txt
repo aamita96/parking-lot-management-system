@@ -1,0 +1,15 @@
+You're checked in
+
+{{.VehicleNumber}} entered the car park and is parked at spot {{.SpotCode}}.
+
+Ticket number: {{.TicketNumber}}
+Vehicle:       {{.VehicleLine}}
+Spot:          {{.SpotLine}}
+Entry time:    {{.EntryTime}}
+Rate:          {{.Rate}}
+
+Pay at the PAY kiosk on your way out. We'll email your receipt when you leave.
+{{if .Simulated}}
+(Simulator test: this visit was created by the parking lot simulator.)
+{{end}}
+-- PLMS Parking
