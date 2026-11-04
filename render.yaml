@@ -15,6 +15,7 @@
 databases:
   - name: plms-db
     plan: free
+    region: singapore # must match plms-api: Render's internal database address only works within one region
     databaseName: plms
     user: plms
 
