@@ -59,10 +59,10 @@ func (s *ResendSender) Send(ctx context.Context, m Message) (string, error) {
 	for k, v := range m.Tags {
 		req.Tags = append(req.Tags, resend.Tag{Name: k, Value: v})
 	}
-	var opts *resend.SendEmailOptions
-	if m.IdempotencyKey != "" {
-		opts = &resend.SendEmailOptions{IdempotencyKey: m.IdempotencyKey}
-	}
+	// Always pass real options, even with an empty key (code emails have none). A nil
+	// *SendEmailOptions would look non-nil inside the library and crash it with a nil-pointer panic.
+	// An empty key is simply not sent to Resend.
+	opts := &resend.SendEmailOptions{IdempotencyKey: m.IdempotencyKey}
 	resp, err := s.client.Emails.SendWithOptions(ctx, req, opts)
 	if err != nil {
 		return "", classify(err)
