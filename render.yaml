@@ -78,15 +78,17 @@ services:
       - key: KAFKA_REPLICATION_FACTOR
         value: "-1" # use the Kafka provider's default
 
-      # Email. With EMAIL_ENABLED=false emails are only logged and the 6-digit code is shown on
-      # screen (fine for a demo, not for real use). For real email set EMAIL_ENABLED=true and the
-      # Resend values below, then set DEV_EXPOSE_CODES=false.
+      # Email through Resend. With EMAIL_ENABLED=false emails are only logged, and the 6-digit
+      # code is shown on screen instead (demo without a Resend account).
       - key: EMAIL_ENABLED
-        value: "false"
-      - key: DEV_EXPOSE_CODES
         value: "true"
+      - key: DEV_EXPOSE_CODES
+        value: "false" # codes are emailed now, not shown on screen
       - key: RESEND_API_KEY
-        sync: false
+        sync: false # set in the Render dashboard
+      # onboarding@resend.dev can only send to the email address of your own Resend account.
+      # To email anyone else, verify a domain in Resend and use an address on it here,
+      # e.g. PLMS <no-reply@your-domain.com>.
       - key: EMAIL_FROM
         value: PLMS <onboarding@resend.dev>
 
