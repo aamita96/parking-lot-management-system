@@ -176,15 +176,18 @@ function DetailsStep({
   // user stops typing for 0.4 s before asking the server.
   const plateNow = normalisePlate(values.vehicleNumber)
   const [plateToCheck, setPlateToCheck] = useState('')
+  
   useEffect(() => {
     const timer = setTimeout(() => setPlateToCheck(plateNow), 400)
     return () => clearTimeout(timer)
-  }, [plateNow])
+  }, [plateNow]);
+
   const numberCheck = useQuery({
     queryKey: ['number-check', plateToCheck],
     queryFn: () => api<NumberCheck>(`/public/vehicles/${plateToCheck}/check`),
     enabled: isValidPlate(plateToCheck),
   })
+
   const alreadyTaken = numberCheck.data?.registered === true && numberCheck.data.vehicleNumber === plateNow
 
   const submit = useMutation({

@@ -20,7 +20,7 @@ function AvailabilityPage() {
   const availability = useQuery({
     queryKey: keys.availability,
     queryFn: () => api<Availability>('/availability'),
-    refetchInterval: 5000,
+    refetchInterval: 10000,
   })
   const data = availability.data
   const totalFree = data ? data.panels.reduce((sum, panel) => sum + panel.available, 0) : 0

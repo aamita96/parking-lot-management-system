@@ -40,7 +40,8 @@ function SignIn() {
   const sendCode = useMutation({
     mutationFn: () => api<CodeSent>('/public/sign-in', { method: 'POST', body: { email } }),
     onSuccess: setCodeSent,
-  })
+  });
+
   const verify = useMutation({
     mutationFn: (code: string) => api<OwnerSession>('/public/sign-in/verify', { method: 'POST', body: { email, code } }),
     onSuccess: (session) => {
@@ -118,7 +119,7 @@ function Dashboard() {
   const vehicles = useQuery({
     queryKey: keys.myVehicles,
     queryFn: () => api<{ items: MyVehicle[] }>('/me/vehicles', { auth: 'owner' }),
-    refetchInterval: 10000,
+    refetchInterval: 60000,
   })
 
   return (
